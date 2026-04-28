@@ -43,6 +43,7 @@ final class WorkflowField extends AbstractConfigField
 
     public function renderConfigForm(
         Form $form,
+        FormDestination $destination,
         JsonFieldInterface $config,
         string $input_name,
         array $display_options
