@@ -31,13 +31,13 @@ class Workflow extends CommonDBTM
     {
         $menu = [
             'title' => self::getTypeName(2),
-            'page'  => Plugin::getWebDir('tasksmanager') . '/front/workflow.list.php',
+            'page'  => Plugin::getWebDir('tasksmanager', false) . '/front/workflow.list.php',
             'icon'  => self::getIcon(),
         ];
 
         if (Session::haveRight('config', UPDATE)) {
-            $menu['links']['search'] = Plugin::getWebDir('tasksmanager') . '/front/workflow.list.php';
-            $menu['links']['add']    = Plugin::getWebDir('tasksmanager') . '/front/workflow.form.php';
+            $menu['links']['search'] = Plugin::getWebDir('tasksmanager', false) . '/front/workflow.list.php';
+            $menu['links']['add']    = Plugin::getWebDir('tasksmanager', false) . '/front/workflow.form.php';
         }
 
         return $menu;
