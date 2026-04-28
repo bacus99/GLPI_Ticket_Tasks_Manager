@@ -7,6 +7,7 @@ use Glpi\Form\AnswersSet;
 use Glpi\Form\Destination\AbstractConfigField;
 use Glpi\Form\Destination\CommonITILField\Category;
 use Glpi\Form\Destination\FormDestination;
+use Glpi\Form\Destination\FormDestinationTicket;
 use Glpi\Form\Form;
 use GlpiPlugin\Tasksmanager\Workflow;
 use Ticket;
@@ -42,7 +43,6 @@ final class WorkflowField extends AbstractConfigField
 
     public function renderConfigForm(
         Form $form,
-        FormDestination $destination,
         JsonFieldInterface $config,
         string $input_name,
         array $display_options

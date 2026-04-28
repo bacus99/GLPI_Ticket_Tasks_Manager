@@ -87,6 +87,13 @@
     cursor: grabbing;
 }
 
+/* ── Workflow steps table ───────────────────────────────────────────────── */
+
+#tm-steps-table td,
+#tm-steps-table th {
+    color: var(--tblr-body-color, var(--bs-body-color, #182433));
+}
+
 /* ── Global dashboard ───────────────────────────────────────────────────── */
 
 .tasksmanager-global-dashboard {

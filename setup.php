@@ -32,17 +32,13 @@ function plugin_init_tasksmanager(): void
     // Workflow tab on tickets
     Plugin::registerClass(TaskDashboard::class, ['addtabon' => ['Ticket']]);
 
-    // Workflow field in form destinations — guarded: form system may not be initialized yet
-    try {
-        if (class_exists('Glpi\Form\Destination\FormDestinationManager')) {
-            \Glpi\Form\Destination\FormDestinationManager::getInstance()
-                ->registerPluginCommonITILConfigField(
-                    \Glpi\Form\Destination\FormDestinationTicket::class,
-                    new \GlpiPlugin\Tasksmanager\Form\Destination\WorkflowField()
-                );
-        }
-    } catch (\Throwable $e) {
-        // silently skip if form system or plugin autoloader not ready
+    // Workflow field in form destinations
+    if (class_exists(\Glpi\Form\Destination\FormDestinationManager::class)) {
+        \Glpi\Form\Destination\FormDestinationManager::getInstance()
+            ->registerPluginCommonITILConfigField(
+                \Glpi\Form\Destination\FormDestinationTicket::class,
+                new \GlpiPlugin\Tasksmanager\Form\Destination\WorkflowField()
+            );
     }
 }
 

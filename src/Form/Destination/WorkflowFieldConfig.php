@@ -2,12 +2,26 @@
 
 namespace GlpiPlugin\Tasksmanager\Form\Destination;
 
-use Glpi\Form\Destination\CommonITILField\SimpleValueConfig;
+use Glpi\DBAL\JsonFieldInterface;
 
-/**
- * Stores the selected workflow ID for a form destination field.
- * Value is the workflows_id as a string (empty string = no workflow).
- */
-final class WorkflowFieldConfig extends SimpleValueConfig
+final class WorkflowFieldConfig implements JsonFieldInterface
 {
+    public function __construct(private readonly string $value = '')
+    {
+    }
+
+    public function getValue(): string
+    {
+        return $this->value;
+    }
+
+    public static function jsonDeserialize(array $data): static
+    {
+        return new self($data['value'] ?? '');
+    }
+
+    public function jsonSerialize(): array
+    {
+        return ['value' => $this->value];
+    }
 }
