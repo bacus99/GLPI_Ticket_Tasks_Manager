@@ -363,6 +363,23 @@ switch ($action) {
         if (!$ticket_workflows_id) {
             tm_respond(false, 400, 'Missing ticket_workflows_id');
         }
+
+        // Per-ticket authorization. The `plugin_tasksmanager_workflows
+        // UPDATE` right gates *who* can manage workflows in general; it
+        // does NOT bound the user to tickets they can actually touch.
+        // Resolve the parent ticket and gate on Ticket::can(UPDATE) so
+        // a workflow manager scoped to Entity A can't skip / mutate
+        // active workflows on tickets in Entity B by enumerating the
+        // sequential ticket_workflows_id values.
+        $tickets_id = Workflow::getTicketIdForWorkflow($ticket_workflows_id);
+        if ($tickets_id <= 0) {
+            tm_respond(false, 404, 'Workflow not found or not active');
+        }
+        $ticket = new Ticket();
+        if (!$ticket->getFromDB($tickets_id) || !$ticket->canUpdateItem()) {
+            tm_respond(false, 403, 'Access denied');
+        }
+
         if (!Workflow::skipCurrentStep($ticket_workflows_id)) {
             tm_respond(false, 500, 'Skip failed (workflow may not be active)');
         }
@@ -376,6 +393,21 @@ switch ($action) {
         if (!$ticket_workflows_id) {
             tm_respond(false, 400, 'Missing ticket_workflows_id');
         }
+
+        // Same per-ticket authorization as skip_current_step. Without
+        // this gate, a workflow manager could restart steps on tickets
+        // outside their entity scope and trigger task creation /
+        // re-assignment side-effects without ever being able to view
+        // the ticket itself.
+        $tickets_id = Workflow::getTicketIdForWorkflow($ticket_workflows_id);
+        if ($tickets_id <= 0) {
+            tm_respond(false, 404, 'Workflow not found or not active');
+        }
+        $ticket = new Ticket();
+        if (!$ticket->getFromDB($tickets_id) || !$ticket->canUpdateItem()) {
+            tm_respond(false, 403, 'Access denied');
+        }
+
         if (!Workflow::restartCurrentStep($ticket_workflows_id)) {
             tm_respond(false, 500, 'Restart failed (workflow may not be active)');
         }
@@ -388,6 +420,17 @@ switch ($action) {
         $tickets_id = (int)($_POST['tickets_id'] ?? 0);
         if (!$tickets_id) {
             tm_respond(false, 400, 'Missing tickets_id');
+        }
+
+        // Per-ticket authorization. The profile-level `ticket UPDATE`
+        // check above doesn't bound the user to tickets in their entity
+        // scope. Mirror the apply_to_ticket pattern: load the parent
+        // ticket and verify canUpdateItem() — that walks the actor and
+        // entity checks, refusing IDOR attempts (e.g. an Entity-A user
+        // cancelling an active workflow on a ticket in Entity B).
+        $ticket = new Ticket();
+        if (!$ticket->getFromDB($tickets_id) || !$ticket->canUpdateItem()) {
+            tm_respond(false, 403, 'Access denied');
         }
 
         // Capture context before cancelling so we can log it

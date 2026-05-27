@@ -55,6 +55,22 @@ try {
                 echo json_encode(['ok' => false, 'error' => 'Invalid ticket ID']);
                 exit;
             }
+            // Per-ticket authorization. The global `ticket UPDATE` check
+            // upstream only verifies the *profile* right; it doesn't bound
+            // the user to tickets they can actually see. Ticket::can()
+            // resolves the row, checks the READ right, AND validates entity
+            // visibility via Session::haveAccessToEntity() — without this
+            // gate, an Entity-A technician could enumerate ticket IDs and
+            // pull task-state (notes, assignees, workflow step data) for
+            // any ticket in any entity. The taskstates table has no
+            // entities_id column, so the entity boundary has to be
+            // enforced by going through the parent Ticket.
+            $ticket = new \Ticket();
+            if (!$ticket->can($tickets_id, READ)) {
+                http_response_code(403);
+                echo json_encode(['ok' => false, 'error' => 'Access denied']);
+                exit;
+            }
             $states = TaskState::getForTicket($tickets_id);
             echo json_encode(['ok' => true, 'data' => $states]);
             break;

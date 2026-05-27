@@ -847,6 +847,22 @@ class Workflow extends CommonDBTM
         return $iter->current();
     }
 
+    /**
+     * Resolve the parent ticket id for a ticket-workflow row.
+     *
+     * Returns 0 if the row doesn't exist OR the workflow isn't active.
+     * Used by the AJAX boundary (`skip_current_step`, `restart_current_step`)
+     * to look up the ticket before checking per-ticket authorization —
+     * `ticket_workflows_id` values are sequential auto-increments and
+     * enumerable, so gating on the ticket itself is the only way to
+     * enforce GLPI's entity / actor visibility on these endpoints.
+     */
+    public static function getTicketIdForWorkflow(int $ticket_workflows_id): int
+    {
+        $row = self::loadActiveTicketWorkflow($ticket_workflows_id);
+        return $row ? (int)$row['tickets_id'] : 0;
+    }
+
     /** Mark the workflow-tracked task at the given step as Done. Best-effort. */
     private static function markCurrentTaskDone(int $tickets_id, int $ticket_workflows_id, int $step_order): void
     {

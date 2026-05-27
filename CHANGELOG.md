@@ -3,6 +3,41 @@
 All notable changes to **Tasks Manager** are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] — 2026-05-27
+
+### Security
+- **CVE-pending — three IDOR / missing per-ticket authorization fixes**
+  in the AJAX endpoints. Each previously gated only on the *global*
+  profile right (`ticket UPDATE` or `plugin_tasksmanager_workflows
+  UPDATE`) without verifying the caller had access to the specific
+  ticket being targeted. Because ticket IDs and `ticket_workflows_id`
+  values are sequential auto-increments, this allowed a user scoped
+  to Entity A to enumerate IDs and act on tickets in Entity B.
+
+  All three endpoints now resolve the parent ticket and gate on
+  `Ticket::can($id, READ|UPDATE)` (which walks the actor / entity
+  visibility chain via `Session::haveAccessToEntity()`):
+
+  - **`ajax/taskstate.php?action=get_states`** (HIGH) — previously
+    leaked task-state rows (notes, assignees, workflow step data,
+    progress, due dates) for any ticket. Now requires `Ticket READ`
+    on the target.
+  - **`ajax/workflow.php?action=remove_from_ticket`** (HIGH) — could
+    cancel active workflows on any ticket. Now mirrors the
+    `apply_to_ticket` pattern (`getFromDB` + `canUpdateItem`).
+  - **`ajax/workflow.php?action=skip_current_step`** and
+    **`?action=restart_current_step`** (MEDIUM) — could force-advance
+    or re-instantiate workflow steps on any ticket, triggering task
+    creation and group reassignment side-effects. Both now resolve
+    the parent ticket via new helper `Workflow::getTicketIdForWorkflow()`
+    and gate on `canUpdateItem()` before the workflow state mutation.
+
+### Notes
+- No schema change. No user-facing UI change. Pure server-side
+  authorization hardening — safe to drop in.
+- Behaviour on legitimate operations is unchanged; only IDOR attempts
+  now return `403 Access denied`.
+
 ## [1.6.0] — 2026-05-26
 
 ### Added
