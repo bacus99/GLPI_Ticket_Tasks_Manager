@@ -49,6 +49,12 @@ class Workflow extends CommonDBTM
             $menu['links']['add']    = Plugin::getWebDir('tasksmanager', false) . '/front/workflow.form.php';
         }
 
+        if (Session::haveRight(self::$rightname, READ)) {
+            // Custom menu link to the analytics dashboard (chart icon).
+            $menu['links']['<i class="ti ti-chart-bar"></i>'] =
+                Plugin::getWebDir('tasksmanager', false) . '/front/analytics.php';
+        }
+
         return $menu;
     }
 

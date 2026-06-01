@@ -71,11 +71,16 @@ $can_edit = Session::haveRight('plugin_tasksmanager_workflows', UPDATE);
 echo '<div class="container-fluid mt-3">';
 echo '<div class="d-flex justify-content-between align-items-center mb-3">';
 echo '<h2><i class="ti ti-git-branch me-2"></i>' . __('Workflows', 'tasksmanager') . '</h2>';
+echo '<div class="d-flex gap-2">';
+echo '<a href="analytics.php" class="btn btn-outline-secondary">';
+echo '<i class="ti ti-chart-bar me-1"></i>' . __('Analytics', 'tasksmanager');
+echo '</a>';
 if ($can_edit) {
     echo '<a href="workflow.form.php" class="btn btn-primary">';
     echo '<i class="ti ti-plus me-1"></i>' . __('Add workflow', 'tasksmanager');
     echo '</a>';
 }
+echo '</div>';
 echo '</div>';
 
 echo '<div class="card">';
