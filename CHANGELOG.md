@@ -3,6 +3,35 @@
 All notable changes to **Tasks Manager** are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] — 2026-05-29
+
+### Added
+- **Workflow analytics dashboard** (Tools → Workflows → **Analytics**, or
+  the chart icon in the Tools menu). A cross-ticket aggregate view mined
+  entirely from the existing audit log — no new schema, no new data
+  collection.
+
+  - **KPI cards**: workflows defined, active / completed / cancelled
+    instances, and SLA warnings + breaches over the last 30 days.
+  - **Workflow performance table**: per workflow — times applied,
+    completed, still active, a completion-rate progress bar, average
+    end-to-end duration (workflow_applied → workflow_completed), and
+    SLA-breach count.
+  - **Step breakdown**: pick a workflow and see the average time the
+    workflow spent on each step before advancing (bottleneck bars),
+    sample counts, and per-step SLA warning / breach counts. Bars are
+    toned red (breaches) / amber (warnings) / blue (clean) so problem
+    steps jump out.
+
+  Charts are pure CSS/Tabler progress bars — no external JS dependency,
+  so the page renders reliably on any GLPI install.
+
+### Notes
+- The "average time on step" is derived by folding the ordered
+  `step_started` / `workflow_completed` events per instance, so it
+  reflects real dwell time including any waiting/approval gaps.
+- Requires `plugin_tasksmanager_workflows : READ`.
+
 ## [1.8.1] — 2026-05-29
 
 ### Added

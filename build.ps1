@@ -54,6 +54,11 @@ foreach ($p in $ignore) {
     }
 }
 
+# ALWAYS exclude staging + output dirs. .build lives inside $PSScriptRoot, so
+# without this robocopy /E recurses into it (.build/<plugin>/.build/...) and hangs.
+$xd += $work       # .build
+$xd += $dist       # dist
+
 $rcArgs = @(
     $PSScriptRoot, $stage, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
 ) + (@('/XD') + $xd) + (@('/XF') + $xf)
