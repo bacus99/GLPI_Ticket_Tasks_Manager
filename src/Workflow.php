@@ -182,6 +182,12 @@ class Workflow extends CommonDBTM
     {
         global $DB;
 
+        // Follow-up-only step (no task template): post just an ITILFollowup
+        // and let the workflow flow straight through it. Always non-blocking.
+        if ((int)($step['tasktemplates_id'] ?? 0) <= 0) {
+            return self::applyFollowupOnlyStep($tickets_id, $step, $ticket_workflows_id);
+        }
+
         $template = new \TaskTemplate();
         if (!$template->getFromDB((int)$step['tasktemplates_id'])) {
             return false;
@@ -240,13 +246,38 @@ class Workflow extends CommonDBTM
 
         // IMPORTANT: swap the ticket's ASSIGN actors BEFORE creating the task,
         // so GLPI's "new task" notification (sent inside TicketTask::add())
-        // goes to the new step's team, not the previous one.
+        // goes to the new step's team, not the previous one. This applies to
+        // EVERY step type, including non-blocking Information / Done steps —
+        // those are commonly used as the final "hand the ticket to team X"
+        // milestone, so they must set the ticket's team too.
         //
-        // Skip when the workflow has `assign_ticket_to_task = 0` — in that
-        // case only the new task gets the template tech/group; the ticket's
-        // own assignment is left untouched.
+        // Skip only when the workflow has `assign_ticket_to_task = 0`.
+        //
+        // The swap is performed SILENTLY (swapAssignActors disables the
+        // ticket-update notification): historically the swap's own
+        // Ticket::update raised an "update" notification *before* the new
+        // task existed, so it rendered with the previous task's content —
+        // that was the "email shows the previous task" bug. The task's own
+        // add_task notification (fired just below) is the one that should
+        // email, and it carries the correct current-task content.
         if (($tpl_user > 0 || $tpl_group > 0) && self::shouldAssignTicketToTaskTeam($ticket_workflows_id)) {
             self::swapAssignActors($tickets_id, $tpl_user, $tpl_group);
+        }
+
+        // For NON-BLOCKING steps (Information / Done), suppress the task's
+        // own add_task notification — it is unreliable here. GLPI renders
+        // task notifications by listing ALL ticket tasks ordered
+        // `date_mod DESC, id ASC`; a task auto-created in the SAME request
+        // that just completed the previous task ties on the second, so the
+        // lower-id (previous) task renders first → "email shows the
+        // previous task's content". We instead deliver the step's message
+        // through a FOLLOWUP below, which GLPI orders `date_mod DESC,
+        // id DESC` (newest first) and therefore renders correctly.
+        // Blocking "To do" steps are completed in their own later request,
+        // so they don't tie — their task email is left untouched.
+        $is_blocking = ($task_state === 1);
+        if (!$is_blocking) {
+            $input['_disablenotif'] = true;
         }
 
         $task        = new \TicketTask();
@@ -291,6 +322,19 @@ class Workflow extends CommonDBTM
         $fup_template_id = (int)($step['itilfollowuptemplates_id'] ?? 0);
         if ($fup_template_id > 0) {
             $new_followup_id = self::applyFollowupTemplate($tickets_id, $fup_template_id);
+        } elseif (!$is_blocking) {
+            // Non-blocking step with no explicit answer template: mirror the
+            // task content into a followup so the step's message still goes
+            // out — reliably, with the correct content — since we suppressed
+            // the (unreliable) task email above. The followup inherits the
+            // template's privacy so an internal note stays internal.
+            $fu = new \ITILFollowup();
+            $new_followup_id = (int)$fu->add([
+                'itemtype'   => 'Ticket',
+                'items_id'   => $tickets_id,
+                'content'    => $content,
+                'is_private' => (int)($template->fields['is_private'] ?? 0),
+            ]);
         }
 
         // Audit log
@@ -320,6 +364,101 @@ class Workflow extends CommonDBTM
         );
 
         return true;
+    }
+
+    /**
+     * Apply a FOLLOW-UP-ONLY step: a workflow step with no task template,
+     * just an ITILFollowup ("answer") posted to the ticket. Always
+     * non-blocking — the workflow flows straight through it. Used for pure
+     * status-update milestones ("we've received your request and started
+     * provisioning") that don't need anyone to tick a task.
+     */
+    private static function applyFollowupOnlyStep(int $tickets_id, array $step, int $ticket_workflows_id): bool
+    {
+        global $DB;
+
+        // A follow-up has no team of its own, so its notification would go to
+        // whoever the ticket is currently assigned to (the previous step's
+        // team). If this step carries an assign target, reassign the ticket
+        // FIRST (silently — swapAssignActors disables the update notif), so
+        // the follow-up posted just below reaches the intended team.
+        $assign_group = (int)($step['assign_groups_id'] ?? 0);
+        $assign_user  = (int)($step['assign_users_id']  ?? 0);
+        if (($assign_group > 0 || $assign_user > 0)
+            && self::shouldAssignTicketToTaskTeam($ticket_workflows_id)
+        ) {
+            self::swapAssignActors($tickets_id, $assign_user, $assign_group);
+        }
+
+        $fup_template_id = (int)($step['itilfollowuptemplates_id'] ?? 0);
+        $new_followup_id = $fup_template_id > 0
+            ? self::applyFollowupTemplate($tickets_id, $fup_template_id)
+            : 0;
+
+        // Record a taskstate marker so the step counts as "started/done" in
+        // the dashboard (Done badge, not Skipped) and so step ordering /
+        // progress maths stay consistent. No real TicketTask exists, so
+        // tickettasks_id stays 0.
+        $DB->insert('glpi_plugin_tasksmanager_taskstates', [
+            'tickets_id'          => $tickets_id,
+            'tickettasks_id'      => 0,
+            'plugin_status'       => 'done',
+            'progress'            => 100,
+            'priority'            => 3,
+            'ticket_workflows_id' => $ticket_workflows_id,
+            'workflow_step_order' => (int)$step['step_order'],
+            'date_creation'       => date('Y-m-d H:i:s'),
+        ]);
+
+        // Same browser-refresh signal as a normal advance.
+        if (!headers_sent()) {
+            header('X-TM-Workflow-Advanced: 1');
+        }
+
+        $tw_lookup = $DB->request([
+            'SELECT' => ['workflows_id'],
+            'FROM'   => 'glpi_plugin_tasksmanager_ticket_workflows',
+            'WHERE'  => ['id' => $ticket_workflows_id],
+            'LIMIT'  => 1,
+        ]);
+        $wf_id_for_log = (count($tw_lookup) > 0) ? (int)$tw_lookup->current()['workflows_id'] : 0;
+
+        self::logEvent(
+            'step_started',
+            $tickets_id,
+            $wf_id_for_log,
+            $ticket_workflows_id,
+            (int)$step['step_order'],
+            [
+                'tickettasks_id'           => 0,
+                'tasktemplates_id'         => 0,
+                'followup_only'            => true,
+                'itilfollowuptemplates_id' => $fup_template_id,
+                'itilfollowups_id'         => $new_followup_id,
+            ]
+        );
+
+        return true;
+    }
+
+    /**
+     * Is this step non-blocking — i.e. nothing for a human to tick, so the
+     * workflow should advance past it immediately?
+     *   - follow-up-only step (no task template) → always non-blocking
+     *   - task whose template state is Information/Done (not "To do")
+     *   - missing/invalid template → treat as non-blocking so a broken
+     *     step can't stall the workflow forever
+     */
+    private static function isStepNonBlocking(array $step): bool
+    {
+        if ((int)($step['tasktemplates_id'] ?? 0) <= 0) {
+            return true;
+        }
+        $t = new \TaskTemplate();
+        if (!$t->getFromDB((int)$step['tasktemplates_id'])) {
+            return true;
+        }
+        return (int)($t->fields['state'] ?? 1) !== 1;
     }
 
     /**
@@ -413,19 +552,16 @@ class Workflow extends CommonDBTM
             ['id' => $ticket_workflows_id]
         );
 
-        // Keep going past non-blocking steps.
-        $template = new \TaskTemplate();
-        if ($template->getFromDB((int)$next['tasktemplates_id'])) {
-            $state = (int)($template->fields['state'] ?? 1);
-            if ($state !== 1) {
-                return self::advanceFrom(
-                    $ticket_workflows_id,
-                    $tickets_id,
-                    $workflows_id,
-                    (int)$next['step_order'],
-                    $depth + 1
-                );
-            }
+        // Keep going past non-blocking steps (follow-up-only, or
+        // Information/Done task templates).
+        if (self::isStepNonBlocking($next)) {
+            return self::advanceFrom(
+                $ticket_workflows_id,
+                $tickets_id,
+                $workflows_id,
+                (int)$next['step_order'],
+                $depth + 1
+            );
         }
         return true;
     }
@@ -498,13 +634,8 @@ class Workflow extends CommonDBTM
         int $tickets_id,
         int $workflows_id
     ): void {
-        $template = new \TaskTemplate();
-        if (!$template->getFromDB((int)$step['tasktemplates_id'])) {
-            return;
-        }
-        $state = (int)($template->fields['state'] ?? 1);
-        if ($state === 1) {
-            return; // "To do" blocks until a human checks the box.
+        if (!self::isStepNonBlocking($step)) {
+            return; // "To do" task blocks until a human checks the box.
         }
         self::advanceFrom($ticket_workflows_id, $tickets_id, $workflows_id, (int)$step['step_order']);
     }
@@ -1238,10 +1369,17 @@ class Workflow extends CommonDBTM
             ];
         }
 
+        // `_disablenotif` suppresses the ticket-update notification for this
+        // actor swap (CommonITILObject honours it — see notification gate in
+        // post_updateItem). Without it, GLPI emails a ticket-update message
+        // *before* the step's new task exists, so it renders with the
+        // previous task's content. We only want the task's own add_task
+        // notification (which has the correct, current content) to fire.
         $ticket = new \Ticket();
         $ticket->update([
-            'id'      => $tickets_id,
-            '_actors' => $actors,
+            'id'             => $tickets_id,
+            '_actors'        => $actors,
+            '_disablenotif'  => true,
         ]);
     }
 

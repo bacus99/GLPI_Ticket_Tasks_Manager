@@ -19,6 +19,7 @@
  *   reorder_steps             – save new step order (array of step IDs)
  *   update_template_comment   – update the linked task template's comment
  *   save_step_rules           – persist the JSON conditional-routing rules for a step
+ *   add_followup_step         – add a follow-up-only step (no task template)
  *   save_step_sla             – persist per-step SLA + escalation config
  *   update_step_followup_template – set/clear the step's ITILFollowupTemplate
  *   list_form_questions       – return [{id,label}] of all defined form questions
@@ -94,6 +95,57 @@ switch ($action) {
             'step_id'    => (int)$DB->insertId(),
             'step_order' => $step_order,
         ]);
+
+    // ── Add a follow-up-only step (no task, just an ITILFollowup) ─────────
+    case 'add_followup_step':
+        Session::checkRight('plugin_tasksmanager_workflows', UPDATE);
+
+        $workflows_id            = (int)($_POST['workflows_id'] ?? 0);
+        $itilfollowuptemplates_id = (int)($_POST['itilfollowuptemplates_id'] ?? 0);
+        $assign_groups_id        = (int)($_POST['assign_groups_id'] ?? 0);
+
+        if (!$workflows_id || !$itilfollowuptemplates_id) {
+            tm_respond(false, 400, 'Missing parameters');
+        }
+
+        $last = $DB->request([
+            'SELECT' => ['step_order'],
+            'FROM'   => 'glpi_plugin_tasksmanager_workflow_steps',
+            'WHERE'  => ['workflows_id' => $workflows_id],
+            'ORDER'  => ['step_order DESC'],
+            'LIMIT'  => 1,
+        ]);
+        $step_order = (count($last) > 0 ? (int)$last->current()['step_order'] : 0) + 10;
+
+        $DB->insert('glpi_plugin_tasksmanager_workflow_steps', [
+            'workflows_id'             => $workflows_id,
+            'tasktemplates_id'         => 0, // follow-up-only marker
+            'itilfollowuptemplates_id' => $itilfollowuptemplates_id,
+            'assign_groups_id'         => $assign_groups_id > 0 ? $assign_groups_id : 0,
+            'step_order'               => $step_order,
+            'date_creation'            => date('Y-m-d H:i:s'),
+        ]);
+
+        tm_respond(true, 200, null, [
+            'step_id'    => (int)$DB->insertId(),
+            'step_order' => $step_order,
+        ]);
+
+    // ── Change the team a follow-up-only step assigns the ticket to ───────
+    case 'save_followup_team':
+        Session::checkRight('plugin_tasksmanager_workflows', UPDATE);
+
+        $step_id          = (int)($_POST['step_id'] ?? 0);
+        $assign_groups_id = (int)($_POST['assign_groups_id'] ?? 0);
+        if (!$step_id) {
+            tm_respond(false, 400, 'Missing step_id');
+        }
+        $DB->update(
+            'glpi_plugin_tasksmanager_workflow_steps',
+            ['assign_groups_id' => $assign_groups_id > 0 ? $assign_groups_id : 0],
+            ['id' => $step_id]
+        );
+        tm_respond(true, 200, null, ['assign_groups_id' => $assign_groups_id]);
 
     // ── Update the linked task template's `comment` field ─────────────────
     // (Bound to the description textarea on the workflow editor — changes

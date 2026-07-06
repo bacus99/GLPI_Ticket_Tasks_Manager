@@ -46,9 +46,9 @@ Tasks Manager ajoute un moteur de flux de travail aux tickets GLPI.<br /><br />
 
    <versions>
       <version>
-         <num>1.10.1</num>
+         <num>1.11.1</num>
          <compatibility>~11.0.0</compatibility>
-         <download_url>https://github.com/bacus99/GLPI_Ticket_Tasks_Manager/releases/download/1.10.1/glpi-tasksmanager-1.10.1.tar.bz2</download_url>
+         <download_url>https://github.com/bacus99/GLPI_Ticket_Tasks_Manager/releases/download/1.11.1/glpi-tasksmanager-1.11.1.tar.bz2</download_url>
       </version>
    </versions>
 

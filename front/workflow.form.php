@@ -81,6 +81,7 @@ if (!$is_new) {
             'wfs.sla_breach_groups_id', 'wfs.sla_breach_users_id', 'wfs.sla_use_calendar',
             'wfs.olas_id',
             'wfs.itilfollowuptemplates_id',
+            'wfs.assign_groups_id',
             'tt.name AS tpl_name',
             'tt.comment AS tpl_comment',
         ],
@@ -133,6 +134,7 @@ foreach ($DB->request([
 // ITILFollowupTemplate list for the per-step "answer template" picker.
 // Used to drop a templated followup on the ticket when the step starts.
 $fup_templates = [];
+$fup_name_by_id = [];
 if ($DB->tableExists('glpi_itilfollowuptemplates')) {
     foreach ($DB->request([
         'SELECT' => ['id', 'name'],
@@ -140,6 +142,7 @@ if ($DB->tableExists('glpi_itilfollowuptemplates')) {
         'ORDER'  => ['name ASC'],
     ]) as $t) {
         $fup_templates[] = ['id' => (int)$t['id'], 'name' => (string)$t['name']];
+        $fup_name_by_id[(int)$t['id']] = (string)$t['name'];
     }
 }
 
@@ -414,9 +417,36 @@ global $CFG_GLPI;
                                             <i class="ti ti-external-link ms-1 text-muted small"></i>
                                         </a>
                                     <?php else: ?>
-                                        <?= htmlspecialchars($step['tpl_name'] ?? '—') ?>
+                                        <?php // Follow-up-only step (no task template) ?>
+                                        <span class="badge bg-azure-lt me-1">
+                                            <i class="ti ti-message-2 me-1"></i><?= __('Follow-up', 'tasksmanager') ?>
+                                        </span>
+                                        <?= htmlspecialchars(
+                                            $fup_name_by_id[(int)($step['itilfollowuptemplates_id'] ?? 0)]
+                                            ?? __('(no template)', 'tasksmanager')
+                                        ) ?>
                                     <?php endif; ?>
                                 </div>
+                                <?php if (empty($step['tasktemplates_id'])): ?>
+                                    <?php // Team this follow-up step assigns the ticket to (so the
+                                          // follow-up notification reaches the right group). ?>
+                                    <div class="d-flex flex-wrap gap-1 align-items-center mt-1">
+                                        <span class="small text-muted"><?= __('Assign ticket to', 'tasksmanager') ?></span>
+                                        <select class="form-select form-select-sm tm-fup-team" style="max-width:240px"
+                                                data-step-id="<?= (int)$step['id'] ?>"
+                                                onchange="tmSaveFollowupTeam(this)">
+                                            <option value="0"><?= __('-- Keep current team --', 'tasksmanager') ?></option>
+                                            <?php foreach ($assign_groups as $g): ?>
+                                                <option value="<?= (int)$g['id'] ?>"
+                                                    <?= (int)($step['assign_groups_id'] ?? 0) === (int)$g['id'] ? 'selected' : '' ?>>
+                                                    <?= htmlspecialchars($g['name']) ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <span class="tm-fup-team-status small text-muted ms-1"></span>
+                                    </div>
+                                <?php endif; ?>
+                                <?php if (!empty($step['tasktemplates_id'])): ?>
                                 <button type="button"
                                         class="btn btn-sm btn-link p-0 text-decoration-none tm-toggle-desc"
                                         onclick="tmToggleDesc(this)">
@@ -438,6 +468,7 @@ global $CFG_GLPI;
                                         <span class="tm-desc-status ms-2"></span>
                                     </div>
                                 </div>
+                                <?php endif; ?>
 
                                 <button type="button"
                                         class="btn btn-sm btn-link p-0 text-decoration-none tm-toggle-rules ms-2"
@@ -474,7 +505,9 @@ global $CFG_GLPI;
                                         <?= __('Rules are tried in order. The first match wins. Backward jumps are ignored to prevent loops.', 'tasksmanager') ?>
                                     </div>
                                 </div>
-                                <?= $sla_block_html ?>
+                                <?php if (!empty($step['tasktemplates_id'])): ?>
+                                    <?= $sla_block_html ?>
+                                <?php endif; ?>
                                 <?= $fup_block_html ?>
                             </div>
                             <div class="tm-flow-actions">
@@ -490,7 +523,7 @@ global $CFG_GLPI;
                 <?php endif; ?>
             </div>
 
-            <!-- Add step -->
+            <!-- Add task step -->
             <div class="d-flex gap-2 align-items-center">
                 <select id="tm-new-tpl" class="form-select form-select-sm" style="max-width:400px">
                     <option value=""><?= __('-- Select a task template to add --', 'tasksmanager') ?></option>
@@ -499,8 +532,32 @@ global $CFG_GLPI;
                     <?php endforeach; ?>
                 </select>
                 <button type="button" class="btn btn-primary btn-sm" onclick="tmAddStep()">
-                    <i class="ti ti-plus me-1"></i><?= __('Add step', 'tasksmanager') ?>
+                    <i class="ti ti-plus me-1"></i><?= __('Add task step', 'tasksmanager') ?>
                 </button>
+            </div>
+
+            <!-- Add follow-up-only step (no task — just a message to the requester) -->
+            <div class="d-flex gap-2 align-items-center mt-2 flex-wrap">
+                <select id="tm-new-fup" class="form-select form-select-sm" style="max-width:340px">
+                    <option value=""><?= __('-- Select a follow-up template to add --', 'tasksmanager') ?></option>
+                    <?php foreach ($fup_templates as $ft): ?>
+                        <option value="<?= (int)$ft['id'] ?>"><?= htmlspecialchars($ft['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <select id="tm-new-fup-team" class="form-select form-select-sm" style="max-width:240px"
+                        title="<?= __('Optional: assign the ticket to this team before posting the follow-up', 'tasksmanager') ?>">
+                    <option value="0"><?= __('-- Keep current team --', 'tasksmanager') ?></option>
+                    <?php foreach ($assign_groups as $g): ?>
+                        <option value="<?= (int)$g['id'] ?>"><?= htmlspecialchars($g['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <button type="button" class="btn btn-outline-primary btn-sm" onclick="tmAddFollowupStep()">
+                    <i class="ti ti-message-2 me-1"></i><?= __('Add follow-up step', 'tasksmanager') ?>
+                </button>
+            </div>
+            <div class="text-muted small mt-1">
+                <i class="ti ti-info-circle me-1"></i>
+                <?= __('A follow-up step posts a message on the ticket (no task) and the workflow continues automatically.', 'tasksmanager') ?>
             </div>
 
         </div>
@@ -580,6 +637,40 @@ global $CFG_GLPI;
         els.forEach((el, i) => { el.dataset.stepOrder = (i + 1) * 10; });
         post({action: 'reorder_steps', workflows_id: WORKFLOW_ID, order: JSON.stringify(ids)});
     }
+
+    // Add a follow-up-only step. The follow-up-only card differs enough from
+    // the task-step card that we just reload the editor after inserting —
+    // simpler and less error-prone than maintaining a second JS card template.
+    window.tmAddFollowupStep = function () {
+        const sel  = document.getElementById('tm-new-fup');
+        if (!sel.value) return;
+        const team = document.getElementById('tm-new-fup-team');
+        post({
+            action: 'add_followup_step',
+            workflows_id: WORKFLOW_ID,
+            itilfollowuptemplates_id: sel.value,
+            assign_groups_id: team ? team.value : 0,
+        }).then(resp => {
+            if (!resp.ok) { alert(resp.error || 'Error'); return; }
+            window.location.reload();
+        });
+    };
+
+    // Change the team a follow-up-only step assigns the ticket to.
+    window.tmSaveFollowupTeam = function (sel) {
+        const status = sel.parentElement.querySelector('.tm-fup-team-status');
+        if (status) status.textContent = '<?= __('Saving…', 'tasksmanager') ?>';
+        post({
+            action: 'save_followup_team',
+            step_id: sel.dataset.stepId,
+            assign_groups_id: sel.value,
+        }).then(resp => {
+            if (!status) return;
+            if (!resp.ok) { status.textContent = resp.error || 'Error'; return; }
+            status.textContent = '<?= __('Saved', 'tasksmanager') ?>';
+            setTimeout(() => { status.textContent = ''; }, 1500);
+        });
+    };
 
     window.tmAddStep = function () {
         const sel = document.getElementById('tm-new-tpl');

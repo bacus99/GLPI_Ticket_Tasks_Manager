@@ -142,6 +142,8 @@ function plugin_tasksmanager_install(): bool
             `sla_use_calendar`      TINYINT      NOT NULL DEFAULT 0,
             `olas_id`               INT UNSIGNED NOT NULL DEFAULT 0,
             `itilfollowuptemplates_id` INT UNSIGNED NOT NULL DEFAULT 0,
+            `assign_groups_id`      INT UNSIGNED NOT NULL DEFAULT 0,
+            `assign_users_id`       INT UNSIGNED NOT NULL DEFAULT 0,
             `date_creation`         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
             KEY `workflows_id`  (`workflows_id`),
@@ -196,6 +198,17 @@ function plugin_tasksmanager_install(): bool
         if (!$DB->fieldExists('glpi_plugin_tasksmanager_workflow_steps', 'itilfollowuptemplates_id')) {
             $DB->doQuery("ALTER TABLE `glpi_plugin_tasksmanager_workflow_steps`
                 ADD `itilfollowuptemplates_id` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `olas_id`");
+        }
+        // 1.11.1: team a step assigns the ticket to. Task steps normally take
+        // their team from the task template; a FOLLOW-UP-ONLY step has no
+        // template, so it carries its own assign target here. The ticket is
+        // reassigned to this group/user BEFORE the follow-up is posted, so
+        // the follow-up notification reaches the new team (not the previous
+        // task's team). 0 = leave the ticket's assignment unchanged.
+        if (!$DB->fieldExists('glpi_plugin_tasksmanager_workflow_steps', 'assign_groups_id')) {
+            $DB->doQuery("ALTER TABLE `glpi_plugin_tasksmanager_workflow_steps`
+                ADD `assign_groups_id` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `itilfollowuptemplates_id`,
+                ADD `assign_users_id`  INT UNSIGNED NOT NULL DEFAULT 0 AFTER `assign_groups_id`");
         }
     }
 

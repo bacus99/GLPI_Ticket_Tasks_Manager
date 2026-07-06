@@ -3,6 +3,147 @@
 All notable changes to **Tasks Manager** are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.11.1] — 2026-05-29
+
+### Added
+- **Follow-up steps can set the ticket's team.** A follow-up has no team
+  of its own, so its notification would otherwise go to whoever the
+  ticket is currently assigned to (the previous step's team). A
+  follow-up-only step now has an optional **"Assign ticket to"** group
+  picker — when set, the ticket is reassigned to that group **before**
+  the follow-up is posted, so the follow-up notification reaches the
+  intended team. Choose it when adding the step, or change it later on
+  the step card.
+
+### Schema
+- `assign_groups_id` / `assign_users_id` on
+  `glpi_plugin_tasksmanager_workflow_steps` (idempotent migration).
+  Currently driven for follow-up-only steps; task steps keep taking
+  their team from the task template.
+
+### Internal
+- New AJAX action `save_followup_team`; `add_followup_step` accepts an
+  optional `assign_groups_id`. The reassignment goes through the silent
+  `swapAssignActors()` so it doesn't emit its own update email.
+
+## [1.11.0] — 2026-05-29
+
+### Added
+- **Follow-up-only steps.** A workflow step can now be a pure
+  **follow-up** (ITILFollowup / "answer") with **no task** at all —
+  for status-update milestones like "we've received your request and
+  started provisioning". Previously you had to create a throwaway task
+  just to hang a follow-up on it.
+
+  Add one from the workflow editor: pick a follow-up template in the new
+  **"Add follow-up step"** control (below the existing "Add task step").
+  A follow-up-only step:
+  - posts its templated follow-up on the ticket when reached;
+  - is inherently **non-blocking** — the workflow flows straight through
+    it (no checkbox to tick), chaining to the next step automatically;
+  - shows a blue **Follow-up** badge in the editor, with the task
+    comment + SLA controls hidden (they don't apply without a task);
+  - records a tracking marker so it shows as **Done** (not Skipped) in
+    the ticket's step list.
+
+  New AJAX action `add_followup_step`. Internally a follow-up-only step
+  is a step with `tasktemplates_id = 0` and an
+  `itilfollowuptemplates_id`, handled by the new
+  `Workflow::applyFollowupOnlyStep()`.
+
+### Internal
+- Non-blocking detection consolidated into `Workflow::isStepNonBlocking()`
+  (follow-up-only OR Information/Done task template OR missing template),
+  used by `advanceFrom()` and the apply/skip/restart chaining.
+
+## [1.10.5] — 2026-05-29
+
+### Fixed
+- **Information / Done step emails now carry the correct content.** Final
+  root cause: GLPI renders task notifications by listing *all* of a
+  ticket's tasks ordered `date_mod DESC, id ASC`. A non-blocking task is
+  auto-created in the **same request** that completed the previous task,
+  so both share the same `date_mod` second and the tie breaks on
+  `id ASC` — the lower-id **previous** task renders first. That ordering
+  is GLPI core and can't be overridden from a plugin.
+
+  Fix: for non-blocking (Information / Done) steps we now **suppress the
+  unreliable task email** and deliver the step's message through a
+  **followup** instead. GLPI orders followups `date_mod DESC, id DESC`
+  (newest first), so the followup renders the correct content. Delivery:
+  - if the step has an **answer template**, that followup is the message
+    (as before);
+  - otherwise the step's **task content is mirrored into a followup**, so
+    there's always exactly one correctly-rendered email — never silence.
+
+  The followup inherits the task template's privacy flag (an internal
+  Information note stays internal).
+
+### Notes
+- Blocking "To do" steps are unchanged — they're completed in their own
+  later request, so they never hit the same-second ordering tie, and
+  their task email is left as-is.
+- Known edge: a *blocking* step auto-created via chaining (e.g. Info →
+  To-do in one pass) can still hit the same tie. Not addressed here to
+  avoid changing the established To-do email behaviour; use an answer
+  template on such a step if you need a guaranteed-content email.
+
+## [1.10.4] — 2026-05-29
+
+### Fixed
+- **Information / Done steps set the ticket's team again, and email the
+  correct content — both at once.** The real root cause of the
+  "previous task" email was that `swapAssignActors()` ran
+  `Ticket::update()` to reassign the team *before* the step's new task
+  existed, so GLPI's ticket-update notification rendered with the
+  newest-at-that-instant task — the previous one. 1.10.2/1.10.3 fixed
+  the symptom by skipping the swap for non-blocking steps, but that
+  removed a behaviour users rely on: an Information / Done step (often
+  the final "hand the ticket to team X" milestone) *should* set the
+  ticket's team.
+
+  Correct fix: **the actor swap now runs for every step type again**,
+  but is performed **silently** — `swapAssignActors()` passes
+  `_disablenotif` on its `Ticket::update`, so the swap no longer emits
+  its own (wrongly-rendered) update notification. The step's task fires
+  its normal `add_task` notification with the correct, current content,
+  and it reaches the newly-assigned team.
+
+- Side benefit: step transitions no longer emit a redundant
+  ticket-update email on top of the task email. (Also applies to the
+  completion-group reassignment and the SLA `reassign` breach action,
+  which use the same helper — those already had their own task/followup
+  notification as the intended message.)
+
+## [1.10.3] — 2026-05-29
+
+### Fixed
+- **Information / Done steps email with their OWN content again.** The
+  root cause of the original "email shows the *previous* task's content"
+  bug was the ASSIGN-actor swap: it ran `Ticket::update()` *before* the
+  new task was created, so the ticket-update notification rendered with
+  the newest task at that instant — the previous one. The swap is now
+  skipped for non-blocking (Information / Done) steps (the workflow
+  doesn't rest on them, so reassigning the team to a step it's leaving
+  was wrong anyway). With that spurious update notification gone, the
+  task's own `add_task` notification fires with the correct, current
+  task content.
+
+### Reverted from 1.10.2
+- 1.10.2 additionally suppressed the task notification for non-blocking
+  steps via `_disablenotif` — that was too aggressive and stopped
+  Information / Done milestone emails the team relies on. Reverted:
+  non-blocking steps notify normally again, now with correct content
+  thanks to the actor-swap fix above.
+
+## [1.10.2] — 2026-05-29
+
+### Fixed
+- Non-blocking steps no longer reassign the ticket's team (the swap now
+  happens only on the step the workflow rests on). *(Note: this release
+  also briefly suppressed non-blocking task emails; that part was
+  reverted in 1.10.3.)*
+
 ## [1.10.1] — 2026-05-29
 
 ### Changed
